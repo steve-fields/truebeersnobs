@@ -1,70 +1,137 @@
 var ba = require('beeradvocate-api');
 var GoogleSpreadsheet = require('google-spreadsheet');
 var fs = require('fs');
+var async = require('async');
+
+var fs = require('fs');
 var natural = require('natural');
 var TfIdf = natural.TfIdf;
-var tfIdf = new TfIdf();
+
 
 var doc = new GoogleSpreadsheet('1rK_Rb2gBoe-UEbCBGdNVHgmyWXjh1tK6lxgBajm-aoY');
-var sheet;
 var urls = [];
 
 var creds = require('./g_creds.json');
 
-console.log("hello");
+async.waterfall([
+    (step) => {
+        doc.useServiceAccountAuth(creds, step);
+    },
+    (step) => {
+        doc.getInfo((err, info) => {
+            console.log('Loaded doc: ' + info.title + ' by ' + info.author.email);
+            sheet = info.worksheets[0];
+            console.log('sheet 1: ' + sheet.title + ' ' + sheet.rowCount + 'x' + sheet.colCount);
+            step(null, sheet);
+        });
+    },
+    (sheet, step) => {
+        sheet.getRows({
+            offset: 1
+        }, (err, rows) => {
+            for (var i = 0; i < rows.length; i++) {
+                urls[i] = rows[i].page.substring(28);
+                rows[i].save();
+            }
+            step(null, rows);
+        });
+    },
+    (rows, step) => {
+        var results = [];
+        var saved = 0;
+        var getBeer = () => {
+            ba.beerPage(urls[saved], (beer) => {
+                results.push(JSON.parse(beer));
+                console.log(results[saved][0].beer_name);
+                //rows[saved].beername = results[saved][0].beer_name;
+                //rows[saved].brewery = results[saved][0].brewery_name;
+                //rows[saved].typeofbeer = results[saved][0].beer_style
+                rows[saved].save(() => {
+                    if (saved == rows.length - 1) {
+                        step(null, rows, results);
+                    } else {
+                        saved++;
+                        getBeer();
+                    }
+                });
+            });   
+        }
+        getBeer();
+    },
+    (rows, results, step) => {
+        var written_reviews = [];
+        var saved = 0;
+        var getReviews = () => {
+            ba.beerReviews(urls[saved], (reviews) => {
+                written_reviews.push(reviews);
+                if (saved == rows.length - 1) {
+                    step(null, rows, results, written_reviews);
+                } else {
+                    saved++;
+                    getReviews();
+                }
+            });
+        }
+        getReviews();
+    },
+    (rows, results, written_reviews, step) => {
 
-doc.useServiceAccountAuth(creds, () => {
-    doc.getInfo((err, info) => {
-		console.log(info);
-		console.log('Loaded doc: '+info.title+' by '+info.author.email);
-		sheet = info.worksheets[0];
-		console.log('sheet 1: '+sheet.title+' '+sheet.rowCount+'x'+sheet.colCount);
-		sheet.getRows({
-			offset: 1
-		}, (err, rows) => {
-			for (var i = 0; i < rows.length; i++) {
-				urls[i] = rows[i].page.substring(28);
-			}
-			var ticker = 0;
-			function getBeer() {
-				ba.beerPage(urls[ticker], (beer) => {
-					var result = JSON.parse(beer);
-					rows[ticker].beername = result[0].beer_name;
-					rows[ticker].brewery = result[0].brewery_name;
-					rows[ticker].typeofbeer = result[0].beer_style;
-					var word_salad = [];
-					result[0].written_reviews.forEach((review, index) => {
-					word_salad = word_salad.concat(review.split(/[\s+]+/));
-					for (var i = word_salad.length - 1; i >= 0; i--) {
-						if (word_salad[i] == '') {
-							word_salad.splice(i,1);
-						}
-					}
-					});
-					var fileName = result[0].brewery_name + '_' + result[0].beer_name + '.txt';
-					var fileName = fileName.replace(/[\s\/\?]/g, '');
-					console.log(fileName);
-					var file = fs.createWriteStream('words/' + fileName);
-					file.on('error', (err) => {
-						console.log('Error reading file: ', err);
-					});
-					
-					file.write(word_salad.join(',') + '\n');
-					
-					file.end();
-					rows[ticker].save();
-					ticker++;
-					if (ticker < rows.length) {
-						getBeer();
-					}
-				});
-			}
-			getBeer();
-		});
-    });
-}).then(() => {
-	console.log("test");
-});	
-
-
-	    
+        var filesDone = 0;
+        var tfIdf = new TfIdf();
+        var getWordFiles = () => {
+            var word_salad = [];
+            if (written_reviews[filesDone]) {
+                written_reviews[filesDone].forEach((review, index) => {
+                    word_salad = word_salad.concat(review.split(/[\s+]+/));
+                    for (var i = word_salad.length - 1; i >= 0; i--) {
+                        if (word_salad[i] == '') {
+                            word_salad.splice(i, 1);
+                        }
+                    }
+                });
+                var fileName = results[filesDone][0].brewery_name + '_' + results[filesDone][0].beer_name
+                fileName = fileName.replace(/[\s\/\?]/g, '');
+                console.log(fileName);
+                var file = fs.createWriteStream('words/' + fileName);
+                file.write(word_salad.join(',') + '\n');
+                file.on('error', (err) => {
+                    console.log('Error reading file: ', err);
+                });
+                file.end(() => {
+                    tfIdf.addFileSync('./words/' + fileName);
+                    if (filesDone == rows.length - 1) {
+                        step(null, rows, tfIdf);
+                    } else {
+                        filesDone++;
+                        getWordFiles();
+                    }
+                });
+            }
+        }
+        getWordFiles();
+    },
+    (rows, tfIdf, step) => {
+        var saved = 0;
+        var getFlavorNotes = () => {
+            var flavornotes = "";
+            console.log("words for: " + tfIdf.documents[saved].__key);
+            tfIdf.listTerms(saved).some((item, index) => {
+                console.log(index+1 + ": " + item.term + ", " + item.tfidf);
+                flavornotes += item.term;
+                if (index <= 1) {
+                    flavornotes += ', ';
+                }
+                return index >= 2;
+            });
+            rows[saved].flavornotes = flavornotes;
+            rows[saved].save(() => {
+                if (saved == rows.length - 1) {
+                } else {
+                    saved++;
+                    getFlavorNotes();
+                }
+            });
+        }
+        getFlavorNotes();
+    }
+]); 
