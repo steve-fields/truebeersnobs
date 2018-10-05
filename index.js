@@ -62,34 +62,44 @@ async.waterfall([
         var saved = 0;
         var tfIdf = new TfIdf();
         var getReviews = () => {
-            ba.beerReviews(urls[saved], (reviews) => {
-                var word_salad = [];
-                reviews.forEach((review,index) => {
-                    word_salad = word_salad.concat(review.split(/[\s+]+/));
-                    for (var i = word_salad.length - 1; i >= 0; i--) {
-                        if (word_salad[i] == '') {
-                            word_salad.splice(i, 1);
+            var fileName = results[saved][0].brewery_name + '_' + results[saved][0].beer_name
+            fileName = fileName.replace(/[\s\/\?]/g, '');
+            if (!fs.existsSync('words/' + fileName)) {
+                ba.beerReviews(urls[saved], (reviews) => {
+                    var word_salad = [];
+                    reviews.forEach((review,index) => {
+                        word_salad = word_salad.concat(review.split(/[\s+]+/));
+                        for (var i = word_salad.length - 1; i >= 0; i--) {
+                            if (word_salad[i] == '') {
+                                word_salad.splice(i, 1);
+                            }
                         }
-                    }
+                    });
+                    console.log(fileName);
+                    var file = fs.createWriteStream('words/' + fileName);
+                    file.write(word_salad.join(',') + '\n');
+                    file.on('error', (err) => {
+                        console.log('Error reading file: ', err);
+                    });
+                    file.end(() => {
+                        tfIdf.addFileSync('./words/' + fileName);
+                        if (saved == rows.length - 1) {
+                            step(null, rows, tfIdf);
+                        } else {
+                            saved++;
+                            getReviews();
+                        }
+                    });
                 });
-                var fileName = results[saved][0].brewery_name + '_' + results[saved][0].beer_name
-                fileName = fileName.replace(/[\s\/\?]/g, '');
-                console.log(fileName);
-                var file = fs.createWriteStream('words/' + fileName);
-                file.write(word_salad.join(',') + '\n');
-                file.on('error', (err) => {
-                    console.log('Error reading file: ', err);
-                });
-                file.end(() => {
-                    tfIdf.addFileSync('./words/' + fileName);
-                    if (saved == rows.length - 1) {
-                        step(null, rows, tfIdf);
-                    } else {
-                        saved++;
-                        getReviews();
-                    }
-                });
-            });
+            } else {
+                tfIdf.addFileSync('./words/' + fileName);
+                if (saved == rows.length - 1) {
+                    step(null, rows, tfIdf);
+                } else {
+                    saved++;
+                    getReviews();
+                }
+            }
         }
         getReviews();
     },
