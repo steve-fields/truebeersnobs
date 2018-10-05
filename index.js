@@ -92,6 +92,7 @@ async.waterfall([
                     });
                 });
             } else {
+                console.log(fileName);
                 tfIdf.addFileSync('./words/' + fileName);
                 if (saved == rows.length - 1) {
                     step(null, rows, tfIdf);
