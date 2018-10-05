@@ -59,29 +59,12 @@ async.waterfall([
         getBeer();
     },
     (rows, results, step) => {
-        var written_reviews = [];
         var saved = 0;
+        var tfIdf = new TfIdf();
         var getReviews = () => {
             ba.beerReviews(urls[saved], (reviews) => {
-                written_reviews.push(reviews);
-                if (saved == rows.length - 1) {
-                    step(null, rows, results, written_reviews);
-                } else {
-                    saved++;
-                    getReviews();
-                }
-            });
-        }
-        getReviews();
-    },
-    (rows, results, written_reviews, step) => {
-
-        var filesDone = 0;
-        var tfIdf = new TfIdf();
-        var getWordFiles = () => {
-            var word_salad = [];
-            if (written_reviews[filesDone]) {
-                written_reviews[filesDone].forEach((review, index) => {
+                var word_salad = [];
+                reviews.forEach((review,index) => {
                     word_salad = word_salad.concat(review.split(/[\s+]+/));
                     for (var i = word_salad.length - 1; i >= 0; i--) {
                         if (word_salad[i] == '') {
@@ -89,7 +72,7 @@ async.waterfall([
                         }
                     }
                 });
-                var fileName = results[filesDone][0].brewery_name + '_' + results[filesDone][0].beer_name
+                var fileName = results[saved][0].brewery_name + '_' + results[saved][0].beer_name
                 fileName = fileName.replace(/[\s\/\?]/g, '');
                 console.log(fileName);
                 var file = fs.createWriteStream('words/' + fileName);
@@ -99,16 +82,16 @@ async.waterfall([
                 });
                 file.end(() => {
                     tfIdf.addFileSync('./words/' + fileName);
-                    if (filesDone == rows.length - 1) {
+                    if (saved == rows.length - 1) {
                         step(null, rows, tfIdf);
                     } else {
-                        filesDone++;
-                        getWordFiles();
+                        saved++;
+                        getReviews();
                     }
                 });
-            }
+            });
         }
-        getWordFiles();
+        getReviews();
     },
     (rows, tfIdf, step) => {
         var saved = 0;
