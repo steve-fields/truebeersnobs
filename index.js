@@ -64,7 +64,7 @@ async.waterfall([
         var getReviews = () => {
             var fileName = results[saved][0].brewery_name + '_' + results[saved][0].beer_name
             fileName = fileName.replace(/[\s\/\?]/g, '');
-            if (!fs.existsSync('words/' + fileName)) {
+            if (!fs.existsSync('./words/' + fileName)) {
                 ba.beerReviews(urls[saved], (reviews) => {
                     var word_salad = [];
                     reviews.forEach((review,index) => {
@@ -76,10 +76,10 @@ async.waterfall([
                         }
                     });
                     console.log(fileName);
-                    var file = fs.createWriteStream('words/' + fileName);
+                    var file = fs.createWriteStream('./words/' + fileName);
                     file.write(word_salad.join(',') + '\n');
                     file.on('error', (err) => {
-                        console.log('Error reading file: ', err);
+                        console.error('Error reading file: ', err);
                     });
                     file.end(() => {
                         tfIdf.addFileSync('./words/' + fileName);
